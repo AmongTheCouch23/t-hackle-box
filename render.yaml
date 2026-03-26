@@ -2,9 +2,13 @@ services:
   - type: web
     name: t-hackle-box
     runtime: node
-    plan: free
+    plan: starter
     buildCommand: npm install && npm run build
     startCommand: npm start
+    disk:
+      name: thacklebox-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -12,3 +16,5 @@ services:
         generateValue: true
       - key: PORT
         value: 3001
+      - key: DB_PATH
+        value: /var/data/db.json
