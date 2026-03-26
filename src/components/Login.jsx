@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 
-export default function Login() {
+export default function Login({ onBack }) {
   const { login, register } = useApp();
   const [mode, setMode] = useState('login');
   const [username, setUsername] = useState('');
@@ -178,8 +178,17 @@ export default function Login() {
           </div>
         </div>
 
-        <div style={{ textAlign: 'center', marginTop: 20, ...mono, fontSize: 10, color: '#2a4a3a' }}>
-          Powered by Render.com — sandboxes that self-destruct
+        {onBack && (
+          <div style={{ textAlign: 'center', marginTop: 20 }}>
+            <button onClick={onBack} style={{
+              background: 'transparent', border: 'none',
+              color: '#00ffaa', ...mono, fontSize: 11,
+              cursor: 'pointer', textDecoration: 'none',
+            }}>← Back to home</button>
+          </div>
+        )}
+        <div style={{ textAlign: 'center', marginTop: onBack ? 8 : 20, ...mono, fontSize: 10, color: '#2a4a3a' }}>
+          Collaborative sandboxes that self-destruct
         </div>
       </div>
     </div>

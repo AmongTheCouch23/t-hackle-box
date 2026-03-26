@@ -627,7 +627,7 @@ export default function SandboxDetail({ sandboxId, onClose }) {
 
   const [sandbox, setSandbox] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('files');
+  const [tab, setTab] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [confirmDestroy, setConfirmDestroy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -720,6 +720,9 @@ export default function SandboxDetail({ sandboxId, onClose }) {
   const TABS = canEdit ? ['files', 'info', 'chat', 'activity'] : ['info', 'chat', 'activity'];
   if (isOwner) TABS.push('settings');
 
+  // Set default tab based on access level
+  const activeTab = tab && TABS.includes(tab) ? tab : TABS[0];
+
   if (loading || !sandbox) {
     return (
       <div style={{
@@ -797,8 +800,8 @@ export default function SandboxDetail({ sandboxId, onClose }) {
           {TABS.map(t => (
             <button key={t} onClick={() => setTab(t)} style={{
               background: 'transparent', border: 'none',
-              borderBottom: tab === t ? '2px solid #00ffaa' : '2px solid transparent',
-              color: tab === t ? '#00ffaa' : '#4a6a5a',
+              borderBottom: activeTab === t ? '2px solid #00ffaa' : '2px solid transparent',
+              color: activeTab === t ? '#00ffaa' : '#4a6a5a',
               ...mono, fontSize: 11, padding: '9px 14px',
               cursor: 'pointer', textTransform: 'capitalize', letterSpacing: '0.5px',
               transition: 'all 0.15s',
@@ -810,12 +813,12 @@ export default function SandboxDetail({ sandboxId, onClose }) {
         </div>
 
         {/* Content */}
-        <div style={{ flex: 1, overflow: tab === 'files' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
-          {tab === 'files' && (
+        <div style={{ flex: 1, overflow: activeTab === 'files' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
+          {activeTab === 'files' && (
             <FilesTab sandbox={sandbox} setSandbox={setSandbox} />
           )}
 
-          {tab === 'info' && (
+          {activeTab === 'info' && (
             <div style={{ padding: '16px 20px' }}>
               {/* Live site link */}
               {(() => {
@@ -1013,7 +1016,7 @@ export default function SandboxDetail({ sandboxId, onClose }) {
             </div>
           )}
 
-          {tab === 'chat' && (
+          {activeTab === 'chat' && (
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '12px 20px 16px' }}>
               <div style={{ flex: 1, overflowY: 'auto', marginBottom: 12 }}>
                 {chatMessages.length === 0 ? (
@@ -1068,7 +1071,7 @@ export default function SandboxDetail({ sandboxId, onClose }) {
             </div>
           )}
 
-          {tab === 'activity' && (
+          {activeTab === 'activity' && (
             <div style={{ padding: '12px 20px' }}>
               {(!sandbox.recent_activity || sandbox.recent_activity.length === 0) ? (
                 <div style={{ textAlign: 'center', padding: '40px 0', color: '#3a5a4a', ...mono, fontSize: 12 }}>
@@ -1106,7 +1109,7 @@ export default function SandboxDetail({ sandboxId, onClose }) {
             </div>
           )}
 
-          {tab === 'settings' && (
+          {activeTab === 'settings' && (
             <div style={{ padding: '16px 20px' }}>
               <SettingsTab sandbox={sandbox} setSandbox={setSandbox} />
             </div>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import Login from './components/Login';
+import Landing from './components/Landing';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import CreateModal from './components/CreateModal';
@@ -62,6 +63,7 @@ function AppInner() {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedSandbox, setSelectedSandbox] = useState(null);
   const [view, setView] = useState('dashboard');
+  const [showAuth, setShowAuth] = useState(false);
 
   if (loading) {
     return (
@@ -80,7 +82,10 @@ function AppInner() {
     );
   }
 
-  if (!user) return <Login />;
+  if (!user) {
+    if (showAuth) return <Login onBack={() => setShowAuth(false)} />;
+    return <Landing onAuth={() => setShowAuth(true)} />;
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0e14' }}>
