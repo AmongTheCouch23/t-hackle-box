@@ -16,6 +16,7 @@ const TEMPLATE_META = {
 };
 
 function timeLeft(expiresAt) {
+  if (!expiresAt) return 'permanent';
   const diff = new Date(expiresAt) - new Date();
   if (diff <= 0) return 'expired';
   const hrs = Math.floor(diff / 3600000);
@@ -622,7 +623,7 @@ export default function SandboxDetail({ sandboxId, onClose }) {
                 <div style={{
                   width: 10, height: 10, borderRadius: '50%',
                   background: sandbox.status === 'live' ? '#00ffaa' : sandbox.status === 'promoted' ? '#00aaff' : '#ff4466',
-                  boxShadow: sandbox.status === 'live' ? '0 0 10px #00ffaa' : 'none',
+                  boxShadow: sandbox.status === 'live' ? '0 0 10px #00ffaa' : sandbox.status === 'promoted' ? '0 0 10px #00aaff' : 'none',
                 }} />
                 <span style={{ ...mono, fontWeight: 700, fontSize: 18 }}>{sandbox.name}</span>
                 <span style={{
@@ -633,6 +634,14 @@ export default function SandboxDetail({ sandboxId, onClose }) {
                 }}>
                   {sandbox.visibility === 'public' ? '🌐 public' : '🔒 private'}
                 </span>
+                {sandbox.status === 'promoted' && (
+                  <span style={{
+                    ...mono, fontSize: 9, padding: '2px 6px', borderRadius: 4,
+                    background: 'rgba(0,170,255,0.1)',
+                    color: '#00aaff',
+                    border: '1px solid rgba(0,170,255,0.2)',
+                  }}>🚀 promoted</span>
+                )}
               </div>
               <div style={{ ...mono, fontSize: 10, color: '#3a5a4a' }}>
                 by @{sandbox.owner_username} · {lang.icon} {lang.label} · ⏱ {tl}
@@ -729,8 +738,8 @@ export default function SandboxDetail({ sandboxId, onClose }) {
                 ...mono, fontSize: 11, lineHeight: 1.8,
               }}>
                 <div style={{ color: '#3a5a4a' }}>$ t-hackle status {sandbox.name}</div>
-                <div style={{ color: sandbox.status === 'live' ? '#00ffaa' : '#ff4466' }}>
-                  {sandbox.status === 'live' ? '✓' : '✗'} sandbox {sandbox.status}
+                <div style={{ color: (sandbox.status === 'live' || sandbox.status === 'promoted') ? '#00ffaa' : '#ff4466' }}>
+                  {(sandbox.status === 'live' || sandbox.status === 'promoted') ? '✓' : '✗'} sandbox {sandbox.status}{sandbox.status === 'promoted' ? ' (permanent)' : ''}
                 </div>
                 <div style={{ color: '#5a7a6a' }}> </div>
                 <div style={{ color: '#8ab0a0' }}>  live site:</div>
@@ -741,7 +750,7 @@ export default function SandboxDetail({ sandboxId, onClose }) {
                 <div style={{ color: '#5a7a6a' }}>       .../s/{sandbox.id.slice(0, 8)}/app.js</div>
                 <div style={{ color: '#5a7a6a' }}> </div>
                 <div style={{ color: '#5a7a6a' }}>  visibility: {sandbox.visibility}</div>
-                <div style={{ color: '#ffcc00' }}>  self-destruct: {tl}</div>
+                <div style={{ color: tl === 'permanent' ? '#00aaff' : '#ffcc00' }}>  {tl === 'permanent' ? 'permanent (promoted)' : `self-destruct: ${tl}`}</div>
               </div>
 
               {/* Stats grid */}
@@ -749,7 +758,7 @@ export default function SandboxDetail({ sandboxId, onClose }) {
                 {[
                   { label: 'Template', value: TEMPLATE_META[sandbox.template] || sandbox.template },
                   { label: 'Files', value: (sandbox.files || []).length },
-                  { label: 'Time Left', value: tl, color: tl === 'expired' ? '#ff4466' : '#00ffaa' },
+                  { label: 'Time Left', value: tl === 'permanent' ? '∞ permanent' : tl, color: tl === 'expired' ? '#ff4466' : tl === 'permanent' ? '#00aaff' : '#00ffaa' },
                 ].map((item, i) => (
                   <div key={i} style={{
                     background: 'rgba(255,255,255,0.02)',
@@ -798,7 +807,7 @@ export default function SandboxDetail({ sandboxId, onClose }) {
 
               {/* Actions */}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {!isMember && sandbox.status === 'live' && (
+                {!isMember && (sandbox.status === 'live' || sandbox.status === 'promoted') && (
                   <button onClick={handleJoin} style={{
                     background: 'rgba(0,255,170,0.1)', border: '1px solid rgba(0,255,170,0.2)',
                     color: '#00ffaa', ...mono, fontSize: 11, fontWeight: 600,

@@ -153,7 +153,7 @@ app.post('/api/sandboxes', authMiddleware, (req, res) => {
 app.post('/api/sandboxes/:id/join', authMiddleware, (req, res) => {
   const sandbox = getSandboxById(req.params.id);
   if (!sandbox) return res.status(404).json({ error: 'Sandbox not found' });
-  if (sandbox.status !== 'live') return res.status(400).json({ error: 'Sandbox is not live' });
+  if (sandbox.status !== 'live' && sandbox.status !== 'promoted') return res.status(400).json({ error: 'Sandbox is not active' });
   if (!canAccessSandbox(req.params.id, req.user.id)) {
     return res.status(403).json({ error: 'This sandbox is private. Ask the owner to invite you.' });
   }

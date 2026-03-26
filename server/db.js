@@ -156,7 +156,7 @@ export function getSandboxesForUser(userId) {
 export function getAllPublicSandboxes() {
   const hourAgo = new Date(Date.now() - 3600000).toISOString();
   return db.sandboxes
-    .filter(s => s.status === 'live' && s.visibility === 'public')
+    .filter(s => (s.status === 'live' || s.status === 'promoted') && s.visibility === 'public')
     .map(s => {
       const owner = db.users.find(u => u.id === s.owner_id);
       return {
@@ -176,7 +176,11 @@ export function updateSandboxStatus(id, status) {
   const s = db.sandboxes.find(s => s.id === id);
   if (s) {
     s.status = status;
-    if (status === 'promoted') s.promoted_at = new Date().toISOString();
+    if (status === 'promoted') {
+      s.promoted_at = new Date().toISOString();
+      // Remove expiry — promoted sandboxes are permanent
+      s.expires_at = null;
+    }
     save(db);
   }
 }
@@ -334,7 +338,7 @@ export function expireOldSandboxes() {
   const now = new Date().toISOString();
   let changed = 0;
   db.sandboxes.forEach(s => {
-    if (s.status === 'live' && s.expires_at < now) {
+    if (s.status === 'live' && s.expires_at && s.expires_at < now) {
       s.status = 'expired';
       changed++;
     }
@@ -346,8 +350,8 @@ export function expireOldSandboxes() {
 // --- Stats (only non-sensitive) ---
 export function getGlobalStats() {
   return {
-    liveSandboxes: db.sandboxes.filter(s => s.status === 'live').length,
-    publicSandboxes: db.sandboxes.filter(s => s.status === 'live' && s.visibility === 'public').length,
+    liveSandboxes: db.sandboxes.filter(s => s.status === 'live' || s.status === 'promoted').length,
+    publicSandboxes: db.sandboxes.filter(s => (s.status === 'live' || s.status === 'promoted') && s.visibility === 'public').length,
     totalSandboxes: db.sandboxes.length,
   };
 }

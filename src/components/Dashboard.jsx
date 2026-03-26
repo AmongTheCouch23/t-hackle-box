@@ -11,6 +11,7 @@ const LANG_META = {
 };
 
 function timeLeft(expiresAt) {
+  if (!expiresAt) return 'permanent';
   const diff = new Date(expiresAt) - new Date();
   if (diff <= 0) return 'expired';
   const hrs = Math.floor(diff / 3600000);
@@ -23,7 +24,7 @@ function StatusDot({ status }) {
   return (
     <span style={{
       display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-      background: color, boxShadow: status === 'live' ? `0 0 8px ${color}` : 'none',
+      background: color, boxShadow: (status === 'live' || status === 'promoted') ? `0 0 8px ${color}` : 'none',
       marginRight: 6, flexShrink: 0,
     }} />
   );
@@ -88,7 +89,7 @@ function SandboxCard({ sandbox, onClick }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10, ...mono, fontSize: 11, color: '#5a7a6a' }}>
         <span>👥 {sandbox.collab_count || 1}</span>
         <span>📄 {sandbox.file_count || 0}</span>
-        <span style={{ color: tl === 'expired' ? '#ff4466' : '#00ffaa' }}>⏱ {tl}</span>
+        <span style={{ color: tl === 'expired' ? '#ff4466' : tl === 'permanent' ? '#00aaff' : '#00ffaa' }}>⏱ {tl}</span>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -104,8 +105,8 @@ export default function Dashboard({ view, onSelectSandbox, onNewSandbox }) {
   const [loadingPublic, setLoadingPublic] = useState(false);
   const mono = { fontFamily: "'JetBrains Mono', monospace" };
 
-  const liveSandboxes = sandboxes.filter(s => s.status === 'live');
-  const otherSandboxes = sandboxes.filter(s => s.status !== 'live');
+  const liveSandboxes = sandboxes.filter(s => s.status === 'live' || s.status === 'promoted');
+  const otherSandboxes = sandboxes.filter(s => s.status === 'expired');
 
   useEffect(() => {
     if (view === 'explore') {
@@ -158,7 +159,7 @@ export default function Dashboard({ view, onSelectSandbox, onNewSandbox }) {
       {/* Stats — only non-sensitive */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 28 }}>
         {[
-          { label: 'My Live', value: liveSandboxes.length, color: '#00ffaa', icon: '⚡' },
+          { label: 'My Active', value: liveSandboxes.length, color: '#00ffaa', icon: '⚡' },
           { label: 'My Total', value: sandboxes.length, color: '#ffcc00', icon: '📦' },
           { label: 'Public Sandboxes', value: stats.publicSandboxes, color: '#00ccff', icon: '🌐' },
         ].map((stat, i) => (
@@ -231,7 +232,7 @@ export default function Dashboard({ view, onSelectSandbox, onNewSandbox }) {
           {otherSandboxes.length > 0 && (
             <>
               <div style={{ ...mono, fontSize: 10, color: '#4a5a5a', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: 10, marginTop: 8 }}>
-                Expired / Promoted
+                Expired
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {otherSandboxes.map(s => {
