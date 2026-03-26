@@ -367,7 +367,7 @@ function FilesTab({ sandbox, setSandbox }) {
 // SETTINGS TAB
 // ============================================================
 function SettingsTab({ sandbox, setSandbox }) {
-  const { user, setVisibility, inviteUser, revokeUser, toast } = useApp();
+  const { user, setVisibility, inviteUser, revokeUser, setPublicSite, approveJoinRequest: approveReq, denyJoinRequest: denyReq, toast } = useApp();
   const [inviteInput, setInviteInput] = useState('');
   const [inviting, setInviting] = useState(false);
   const isOwner = sandbox.owner_id === user?.id;
@@ -377,6 +377,14 @@ function SettingsTab({ sandbox, setSandbox }) {
     const newVis = sandbox.visibility === 'public' ? 'private' : 'public';
     try {
       const updated = await setVisibility(sandbox.id, newVis);
+      setSandbox(updated);
+    } catch (err) { toast(err.message, 'error'); }
+  }
+
+  async function handleTogglePublicSite() {
+    if (!isOwner) return;
+    try {
+      const updated = await setPublicSite(sandbox.id, !sandbox.public_site);
       setSandbox(updated);
     } catch (err) { toast(err.message, 'error'); }
   }
@@ -399,6 +407,16 @@ function SettingsTab({ sandbox, setSandbox }) {
     } catch (err) { toast(err.message, 'error'); }
   }
 
+  async function handleApprove(requestId) {
+    try { const updated = await approveReq(sandbox.id, requestId); setSandbox(updated); }
+    catch (err) { toast(err.message, 'error'); }
+  }
+
+  async function handleDeny(requestId) {
+    try { const updated = await denyReq(sandbox.id, requestId); setSandbox(updated); }
+    catch (err) { toast(err.message, 'error'); }
+  }
+
   if (!isOwner) {
     return (
       <div style={{ textAlign: 'center', padding: '40px 0', ...mono, fontSize: 12, color: '#4a5a5a' }}>
@@ -407,12 +425,17 @@ function SettingsTab({ sandbox, setSandbox }) {
     );
   }
 
+  const pendingRequests = sandbox.join_requests || [];
+  const hasIndex = (sandbox.files || []).some(f =>
+    ['index.html', 'index.jsx', 'App.jsx', 'app.jsx'].includes(f.filename)
+  );
+
   return (
     <div>
-      {/* Visibility */}
-      <div style={{ marginBottom: 28 }}>
+      {/* Space Visibility */}
+      <div style={{ marginBottom: 24 }}>
         <div style={{ ...mono, fontSize: 10, color: '#3a5a4a', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: 10 }}>
-          Visibility
+          Space Visibility
         </div>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 14,
@@ -422,12 +445,12 @@ function SettingsTab({ sandbox, setSandbox }) {
         }}>
           <div style={{ flex: 1 }}>
             <div style={{ ...mono, fontSize: 13, fontWeight: 600, marginBottom: 3, color: '#c0d0dd' }}>
-              {sandbox.visibility === 'public' ? '🌐 Public' : '🔒 Private'}
+              {sandbox.visibility === 'public' ? '🌐 Public Space' : '🔒 Private Space'}
             </div>
             <div style={{ fontSize: 11, color: '#4a5a5a', lineHeight: 1.4 }}>
               {sandbox.visibility === 'public'
-                ? 'Visible in Explore. Anyone can view and join.'
-                : 'Only you and invited users can see this sandbox.'}
+                ? 'Visible in Explore. Anyone can view files (read-only). They must request to join to edit.'
+                : 'Only you and invited users can see or access this space.'}
             </div>
           </div>
           <button onClick={handleToggleVisibility} style={{
@@ -435,16 +458,99 @@ function SettingsTab({ sandbox, setSandbox }) {
             border: `1px solid ${sandbox.visibility === 'public' ? 'rgba(255,255,255,0.08)' : 'rgba(0,255,170,0.2)'}`,
             color: sandbox.visibility === 'public' ? '#6a8a7a' : '#00ffaa',
             ...mono, fontSize: 11, fontWeight: 600,
-            padding: '8px 16px', borderRadius: 6, cursor: 'pointer',
-            whiteSpace: 'nowrap',
+            padding: '8px 16px', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
           }}>
             {sandbox.visibility === 'public' ? 'Make Private' : 'Make Public'}
           </button>
         </div>
       </div>
 
-      {/* Invite users */}
-      <div style={{ marginBottom: 28 }}>
+      {/* Public Site Toggle */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ ...mono, fontSize: 10, color: '#3a5a4a', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: 10 }}>
+          Public Website
+        </div>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 14,
+          background: sandbox.public_site ? 'rgba(0,170,255,0.04)' : 'rgba(255,255,255,0.02)',
+          border: `1px solid ${sandbox.public_site ? 'rgba(0,170,255,0.12)' : 'rgba(255,255,255,0.06)'}`,
+          borderRadius: 10, padding: '14px 18px',
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ ...mono, fontSize: 13, fontWeight: 600, marginBottom: 3, color: '#c0d0dd' }}>
+              {sandbox.public_site ? '🌐 Site is Public' : '🔒 Site is Private'}
+            </div>
+            <div style={{ fontSize: 11, color: '#4a5a5a', lineHeight: 1.4 }}>
+              {sandbox.public_site
+                ? 'Anyone can view the live website even if the space is private. They cannot see or edit source files.'
+                : 'Only space members can view the live site. Enable to share the website publicly while keeping source private.'}
+            </div>
+            {!hasIndex && (
+              <div style={{ fontSize: 10, color: '#6a6a3a', marginTop: 4 }}>
+                💡 Add an index.html or index.jsx first to serve a site
+              </div>
+            )}
+          </div>
+          <button onClick={handleTogglePublicSite} style={{
+            background: sandbox.public_site ? 'rgba(255,255,255,0.05)' : 'rgba(0,170,255,0.1)',
+            border: `1px solid ${sandbox.public_site ? 'rgba(255,255,255,0.08)' : 'rgba(0,170,255,0.2)'}`,
+            color: sandbox.public_site ? '#6a8a7a' : '#00aaff',
+            ...mono, fontSize: 11, fontWeight: 600,
+            padding: '8px 16px', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+          }}>
+            {sandbox.public_site ? 'Disable' : 'Enable'}
+          </button>
+        </div>
+      </div>
+
+      {/* Join Requests */}
+      {pendingRequests.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ ...mono, fontSize: 10, color: '#ffcc00', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: 10 }}>
+            Join Requests ({pendingRequests.length})
+          </div>
+          <div style={{
+            background: 'rgba(255,204,0,0.03)',
+            border: '1px solid rgba(255,204,0,0.1)',
+            borderRadius: 8, overflow: 'hidden',
+          }}>
+            {pendingRequests.map(req => (
+              <div key={req.id} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.03)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    width: 24, height: 24, borderRadius: '50%',
+                    background: req.avatar_color || '#ffcc00',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 12, fontWeight: 800, color: '#0a0e14',
+                  }}>
+                    {(req.display_name || req.username || '?')[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <span style={{ ...mono, fontSize: 12, color: '#c0d0dd' }}>@{req.username}</span>
+                    {req.message && <div style={{ fontSize: 10, color: '#5a6a5a', marginTop: 1 }}>"{req.message}"</div>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => handleApprove(req.id)} style={{
+                    background: 'rgba(0,255,170,0.1)', border: '1px solid rgba(0,255,170,0.2)',
+                    color: '#00ffaa', ...mono, fontSize: 10, padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
+                  }}>✓ Approve</button>
+                  <button onClick={() => handleDeny(req.id)} style={{
+                    background: 'rgba(255,68,102,0.08)', border: '1px solid rgba(255,68,102,0.15)',
+                    color: '#ff4466', ...mono, fontSize: 10, padding: '5px 12px', borderRadius: 5, cursor: 'pointer',
+                  }}>✗ Deny</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Invite Users */}
+      <div style={{ marginBottom: 24 }}>
         <div style={{ ...mono, fontSize: 10, color: '#3a5a4a', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: 10 }}>
           Invite Users
         </div>
@@ -515,6 +621,8 @@ export default function SandboxDetail({ sandboxId, onClose }) {
   const {
     user, getSandboxDetail, promoteSandbox, destroySandbox,
     joinSandboxById, leaveSandboxById, messages, sendChat, toast,
+    requestJoin, approveJoinRequest, denyJoinRequest, setPublicSite,
+    setVisibility, inviteUser, revokeUser,
   } = useApp();
 
   const [sandbox, setSandbox] = useState(null);
@@ -523,6 +631,7 @@ export default function SandboxDetail({ sandboxId, onClose }) {
   const [chatInput, setChatInput] = useState('');
   const [confirmDestroy, setConfirmDestroy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [requestSent, setRequestSent] = useState(false);
   const chatEndRef = useRef(null);
 
   const chatMessages = messages[sandboxId] || [];
@@ -572,6 +681,17 @@ export default function SandboxDetail({ sandboxId, onClose }) {
     } catch (err) { toast(err.message, 'error'); }
   }
 
+  async function handleRequestJoin() {
+    try {
+      const result = await requestJoin(sandboxId);
+      if (result.joined) {
+        setSandbox(result.sandbox);
+      } else {
+        setRequestSent(true);
+      }
+    } catch (err) { toast(err.message, 'error'); }
+  }
+
   async function handleLeave() {
     try {
       await leaveSandboxById(sandboxId);
@@ -595,9 +715,22 @@ export default function SandboxDetail({ sandboxId, onClose }) {
   const lang = LANG_META[sandbox.language] || {};
   const isOwner = sandbox.owner_id === user?.id;
   const isMember = sandbox.collaborators?.some(c => c.user_id === user?.id);
+  const canEdit = sandbox._canEdit || isOwner || isMember;
   const tl = timeLeft(sandbox.expires_at);
-  const TABS = ['files', 'info', 'chat', 'activity'];
+  const TABS = canEdit ? ['files', 'info', 'chat', 'activity'] : ['info', 'chat', 'activity'];
   if (isOwner) TABS.push('settings');
+
+  if (loading || !sandbox) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(10px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <div style={{ ...mono, color: '#00ffaa', animation: 'pulse 1.5s ease infinite' }}>Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -807,12 +940,29 @@ export default function SandboxDetail({ sandboxId, onClose }) {
 
               {/* Actions */}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {!isMember && (sandbox.status === 'live' || sandbox.status === 'promoted') && (
+                {/* Invited/allowed user who hasn't joined yet — join directly */}
+                {!isMember && canEdit && (sandbox.status === 'live' || sandbox.status === 'promoted') && (
                   <button onClick={handleJoin} style={{
                     background: 'rgba(0,255,170,0.1)', border: '1px solid rgba(0,255,170,0.2)',
                     color: '#00ffaa', ...mono, fontSize: 11, fontWeight: 600,
                     padding: '10px 18px', borderRadius: 8, cursor: 'pointer',
                   }}>👥 Join Sandbox</button>
+                )}
+                {/* Public viewer without edit access — request to join */}
+                {!isMember && !canEdit && (sandbox.status === 'live' || sandbox.status === 'promoted') && (
+                  requestSent ? (
+                    <div style={{
+                      background: 'rgba(255,204,0,0.08)', border: '1px solid rgba(255,204,0,0.2)',
+                      borderRadius: 8, padding: '10px 18px',
+                      ...mono, fontSize: 11, color: '#ccaa44',
+                    }}>📨 Request sent — waiting for owner approval</div>
+                  ) : (
+                    <button onClick={handleRequestJoin} style={{
+                      background: 'rgba(255,204,0,0.1)', border: '1px solid rgba(255,204,0,0.2)',
+                      color: '#ffcc00', ...mono, fontSize: 11, fontWeight: 600,
+                      padding: '10px 18px', borderRadius: 8, cursor: 'pointer',
+                    }}>📨 Request to Join</button>
+                  )
                 )}
                 {isMember && !isOwner && (
                   <button onClick={handleLeave} style={{
@@ -851,6 +1001,13 @@ export default function SandboxDetail({ sandboxId, onClose }) {
                       borderRadius: 8, cursor: 'pointer',
                     }}>🗑 Destroy</button>
                   )
+                )}
+                {/* Read-only notice for viewers */}
+                {!canEdit && (
+                  <div style={{
+                    ...mono, fontSize: 10, color: '#4a5a5a', padding: '10px 0',
+                    fontStyle: 'italic',
+                  }}>👁 You have read-only access to this space</div>
                 )}
               </div>
             </div>

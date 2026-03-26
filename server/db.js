@@ -11,7 +11,7 @@ function load() {
   try {
     if (fs.existsSync(DB_PATH)) return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
   } catch {}
-  return { users: [], sandboxes: [], collaborators: [], activity: [], files: [] };
+  return { users: [], sandboxes: [], collaborators: [], activity: [], files: [], join_requests: [] };
 }
 
 function save(data) {
@@ -19,8 +19,8 @@ function save(data) {
 }
 
 let db = load();
-// Ensure files array exists for older DBs
 if (!db.files) db.files = [];
+if (!db.join_requests) db.join_requests = [];
 
 // --- User operations ---
 export function createUser(id, username, displayName, passwordHash) {
@@ -53,17 +53,37 @@ export function updateLastSeen(userId) {
 }
 
 // --- Access control ---
-export function canAccessSandbox(sandboxId, userId) {
+// canEdit = owner, collaborator, or invited user. These can modify files.
+export function canEditSandbox(sandboxId, userId) {
   const s = db.sandboxes.find(s => s.id === sandboxId);
   if (!s) return false;
-  if (s.visibility === 'public') return true;
   if (s.owner_id === userId) return true;
-  // Check collaborators
   if (db.collaborators.some(c => c.sandbox_id === sandboxId && c.user_id === userId)) return true;
-  // Check allowed_users list
   const user = db.users.find(u => u.id === userId);
   if (user && (s.allowed_users || []).includes(user.username)) return true;
   return false;
+}
+
+// canView = canEdit OR the space is public. Read-only access to see files but not edit.
+export function canViewSandbox(sandboxId, userId) {
+  const s = db.sandboxes.find(s => s.id === sandboxId);
+  if (!s) return false;
+  if (s.visibility === 'public') return true;
+  return canEditSandbox(sandboxId, userId);
+}
+
+// canViewSite = canView OR public_site is enabled (site is public even if space is private)
+export function canViewSite(sandboxId, userId) {
+  const s = db.sandboxes.find(s => s.id === sandboxId);
+  if (!s) return false;
+  if (s.public_site) return true;
+  if (s.visibility === 'public') return true;
+  return canEditSandbox(sandboxId, userId);
+}
+
+// Legacy alias for WS broadcasts
+export function canAccessSandbox(sandboxId, userId) {
+  return canViewSandbox(sandboxId, userId);
 }
 
 // --- Sandbox operations ---
@@ -74,6 +94,7 @@ export function createSandbox(id, name, ownerId, language, template, durationHou
     duration_hours: durationHours,
     status: 'live',
     visibility: 'private',
+    public_site: false,
     allowed_users: [],
     created_at: now.toISOString(),
     expires_at: new Date(now.getTime() + durationHours * 3600000).toISOString(),
@@ -109,15 +130,23 @@ export function getSandboxById(id) {
       return { ...a, username: u?.username, display_name: u?.display_name };
     });
   const files = db.files.filter(f => f.sandbox_id === id && !f.deleted);
+  const requests = db.join_requests
+    .filter(r => r.sandbox_id === id && r.status === 'pending')
+    .map(r => {
+      const u = db.users.find(u => u.id === r.user_id);
+      return { ...r, username: u?.username, display_name: u?.display_name, avatar_color: u?.avatar_color };
+    });
 
   return {
     ...s,
+    public_site: s.public_site || false,
     owner_username: owner?.username,
     owner_display_name: owner?.display_name,
     owner_color: owner?.avatar_color,
     collaborators: collabs,
     recent_activity,
     files,
+    join_requests: requests,
   };
 }
 
@@ -126,7 +155,6 @@ export function getSandboxesForUser(userId) {
     db.collaborators.filter(c => c.user_id === userId).map(c => c.sandbox_id)
   );
   db.sandboxes.filter(s => s.owner_id === userId).forEach(s => myIds.add(s.id));
-  // Also include sandboxes where user is in allowed_users
   const user = db.users.find(u => u.id === userId);
   if (user) {
     db.sandboxes.forEach(s => {
@@ -145,6 +173,7 @@ export function getSandboxesForUser(userId) {
     const file_count = db.files.filter(f => f.sandbox_id === id && !f.deleted).length;
     return {
       ...s,
+      public_site: s.public_site || false,
       owner_username: owner?.username,
       owner_display_name: owner?.display_name,
       owner_color: owner?.avatar_color,
@@ -161,6 +190,7 @@ export function getAllPublicSandboxes() {
       const owner = db.users.find(u => u.id === s.owner_id);
       return {
         ...s,
+        public_site: s.public_site || false,
         owner_username: owner?.username,
         owner_display_name: owner?.display_name,
         owner_color: owner?.avatar_color,
@@ -178,7 +208,6 @@ export function updateSandboxStatus(id, status) {
     s.status = status;
     if (status === 'promoted') {
       s.promoted_at = new Date().toISOString();
-      // Remove expiry — promoted sandboxes are permanent
       s.expires_at = null;
     }
     save(db);
@@ -187,10 +216,12 @@ export function updateSandboxStatus(id, status) {
 
 export function updateSandboxVisibility(id, visibility) {
   const s = db.sandboxes.find(s => s.id === id);
-  if (s) {
-    s.visibility = visibility;
-    save(db);
-  }
+  if (s) { s.visibility = visibility; save(db); }
+}
+
+export function updatePublicSite(id, publicSite) {
+  const s = db.sandboxes.find(s => s.id === id);
+  if (s) { s.public_site = !!publicSite; save(db); }
 }
 
 export function addAllowedUser(sandboxId, username) {
@@ -217,6 +248,7 @@ export function deleteSandbox(id) {
   db.collaborators = db.collaborators.filter(c => c.sandbox_id !== id);
   db.activity = db.activity.filter(a => a.sandbox_id !== id);
   db.files = db.files.filter(f => f.sandbox_id !== id);
+  db.join_requests = db.join_requests.filter(r => r.sandbox_id !== id);
   save(db);
 }
 
@@ -230,6 +262,8 @@ export function joinSandbox(sandboxId, userId) {
     action: 'joined', detail: 'Joined the sandbox',
     created_at: new Date().toISOString(),
   });
+  // Remove any pending request from this user
+  db.join_requests = db.join_requests.filter(r => !(r.sandbox_id === sandboxId && r.user_id === userId));
   save(db);
   return entry;
 }
@@ -244,14 +278,74 @@ export function leaveSandbox(sandboxId, userId) {
   save(db);
 }
 
-// --- Short ID resolver (matches first 8 chars of UUID or full UUID) ---
+// --- Join Requests ---
+export function createJoinRequest(sandboxId, userId, message) {
+  const existing = db.join_requests.find(r => r.sandbox_id === sandboxId && r.user_id === userId && r.status === 'pending');
+  if (existing) return existing;
+  // Already a member?
+  if (db.collaborators.some(c => c.sandbox_id === sandboxId && c.user_id === userId)) return null;
+  const req = {
+    id: `jr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    sandbox_id: sandboxId,
+    user_id: userId,
+    message: message || '',
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  };
+  db.join_requests.push(req);
+  save(db);
+  return req;
+}
+
+export function approveJoinRequest(requestId, ownerId) {
+  const req = db.join_requests.find(r => r.id === requestId && r.status === 'pending');
+  if (!req) return null;
+  req.status = 'approved';
+  req.resolved_at = new Date().toISOString();
+  req.resolved_by = ownerId;
+  // Add as collaborator
+  joinSandbox(req.sandbox_id, req.user_id);
+  const user = db.users.find(u => u.id === req.user_id);
+  db.activity.push({
+    id: db.activity.length + 1, sandbox_id: req.sandbox_id, user_id: ownerId,
+    action: 'request_approved', detail: `Approved join request from @${user?.username || 'unknown'}`,
+    created_at: new Date().toISOString(),
+  });
+  save(db);
+  return req;
+}
+
+export function denyJoinRequest(requestId, ownerId) {
+  const req = db.join_requests.find(r => r.id === requestId && r.status === 'pending');
+  if (!req) return null;
+  req.status = 'denied';
+  req.resolved_at = new Date().toISOString();
+  req.resolved_by = ownerId;
+  const user = db.users.find(u => u.id === req.user_id);
+  db.activity.push({
+    id: db.activity.length + 1, sandbox_id: req.sandbox_id, user_id: ownerId,
+    action: 'request_denied', detail: `Denied join request from @${user?.username || 'unknown'}`,
+    created_at: new Date().toISOString(),
+  });
+  save(db);
+  return req;
+}
+
+export function getJoinRequestsForUser(userId) {
+  return db.join_requests
+    .filter(r => r.user_id === userId)
+    .map(r => {
+      const s = db.sandboxes.find(s => s.id === r.sandbox_id);
+      return { ...r, sandbox_name: s?.name };
+    });
+}
+
+// --- Short ID resolver ---
 export function resolveShortId(shortId) {
   if (!shortId) return null;
   const cleaned = shortId.toLowerCase().trim();
-  // Try exact match first
   const exact = db.sandboxes.find(s => s.id === cleaned);
   if (exact) return exact.id;
-  // Try prefix match
   const match = db.sandboxes.find(s => s.id.startsWith(cleaned));
   if (match) return match.id;
   return null;
@@ -347,7 +441,7 @@ export function expireOldSandboxes() {
   return changed;
 }
 
-// --- Stats (only non-sensitive) ---
+// --- Stats ---
 export function getGlobalStats() {
   return {
     liveSandboxes: db.sandboxes.filter(s => s.status === 'live' || s.status === 'promoted').length,

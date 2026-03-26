@@ -235,6 +235,42 @@ export function AppProvider({ children }) {
     return data.sandbox;
   }
 
+  async function setPublicSite(sandboxId, enabled) {
+    const data = await apiFetch(`/sandboxes/${sandboxId}/public-site`, {
+      method: 'POST', body: { enabled },
+    });
+    toast(`Public site ${enabled ? 'enabled' : 'disabled'}`, 'success');
+    return data.sandbox;
+  }
+
+  async function requestJoin(sandboxId, message) {
+    const data = await apiFetch(`/sandboxes/${sandboxId}/request-join`, {
+      method: 'POST', body: { message },
+    });
+    if (data.joined) {
+      toast('Joined sandbox!', 'success');
+    } else {
+      toast('Join request sent! The owner will review it.', 'success');
+    }
+    return data;
+  }
+
+  async function approveJoinRequest(sandboxId, requestId) {
+    const data = await apiFetch(`/sandboxes/${sandboxId}/requests/${requestId}/approve`, {
+      method: 'POST',
+    });
+    toast('Request approved!', 'success');
+    return data.sandbox;
+  }
+
+  async function denyJoinRequest(sandboxId, requestId) {
+    const data = await apiFetch(`/sandboxes/${sandboxId}/requests/${requestId}/deny`, {
+      method: 'POST',
+    });
+    toast('Request denied', 'info');
+    return data.sandbox;
+  }
+
   // --- Files ---
   async function createSandboxFile(sandboxId, filename, content, fileType) {
     const data = await apiFetch(`/sandboxes/${sandboxId}/files`, {
@@ -292,7 +328,8 @@ export function AppProvider({ children }) {
       login, register, logout,
       createNewSandbox, joinSandboxById, leaveSandboxById, promoteSandbox, destroySandbox,
       loadSandboxes, loadStats, getSandboxDetail, resolveSpaceUrl, getPublicSandboxes, sendChat, toast,
-      setVisibility, inviteUser, revokeUser,
+      setVisibility, inviteUser, revokeUser, setPublicSite,
+      requestJoin, approveJoinRequest, denyJoinRequest,
       createSandboxFile, updateSandboxFile, renameSandboxFile, deleteSandboxFile,
       sendFileEdit, onFileEvent,
     }}>

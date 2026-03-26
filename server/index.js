@@ -11,9 +11,13 @@ import { fileURLToPath } from 'url';
 import {
   createUser, getUserByUsername, getUserById, updateLastSeen,
   createSandbox, getSandboxById, getSandboxesForUser, getAllPublicSandboxes,
-  updateSandboxStatus, updateSandboxVisibility, addAllowedUser, removeAllowedUser,
-  deleteSandbox, joinSandbox, leaveSandbox, canAccessSandbox, resolveShortId,
+  updateSandboxStatus, updateSandboxVisibility, updatePublicSite,
+  addAllowedUser, removeAllowedUser,
+  deleteSandbox, joinSandbox, leaveSandbox,
+  canAccessSandbox, canEditSandbox, canViewSandbox, canViewSite,
+  resolveShortId,
   createFile, updateFile, renameFile, deleteFile, getFileById,
+  createJoinRequest, approveJoinRequest, denyJoinRequest,
   logActivity, expireOldSandboxes, getGlobalStats,
 } from './db.js';
 import { signToken, verifyToken, authMiddleware } from './auth.js';
@@ -31,12 +35,22 @@ if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '..', 'dist')));
 }
 
-// Helper: check sandbox access for authed user
-function requireSandboxAccess(req, res) {
+// Helper: require view access (read-only ok)
+function requireViewAccess(req, res) {
   const sandbox = getSandboxById(req.params.id);
   if (!sandbox) { res.status(404).json({ error: 'Sandbox not found' }); return null; }
-  if (!canAccessSandbox(req.params.id, req.user.id)) {
+  if (!canViewSandbox(req.params.id, req.user.id)) {
     res.status(403).json({ error: 'You do not have access to this sandbox' }); return null;
+  }
+  return sandbox;
+}
+
+// Helper: require edit access (owner, collaborator, invited)
+function requireEditAccess(req, res) {
+  const sandbox = getSandboxById(req.params.id);
+  if (!sandbox) { res.status(404).json({ error: 'Sandbox not found' }); return null; }
+  if (!canEditSandbox(req.params.id, req.user.id)) {
+    res.status(403).json({ error: 'You do not have edit access to this sandbox' }); return null;
   }
   return sandbox;
 }
@@ -112,8 +126,10 @@ app.get('/api/sandboxes/public', authMiddleware, (req, res) => {
 });
 
 app.get('/api/sandboxes/:id', authMiddleware, (req, res) => {
-  const sandbox = requireSandboxAccess(req, res);
+  const sandbox = requireViewAccess(req, res);
   if (!sandbox) return;
+  // Tell the frontend whether this user can edit
+  sandbox._canEdit = canEditSandbox(req.params.id, req.user.id);
   res.json({ sandbox });
 });
 
@@ -130,18 +146,15 @@ app.post('/api/sandboxes', authMiddleware, (req, res) => {
     const id = uuid();
     const sandbox = createSandbox(id, name, req.user.id, language, template, durationHours || 4);
 
-    // Create a default starter file
     const ext = { python: 'py', javascript: 'js', typescript: 'ts', rust: 'rs', go: 'go', react: 'jsx' }[language] || 'txt';
     const starterContent = getStarterContent(language, template, name);
     createFile(uuid(), id, req.user.id, `main.${ext}`, starterContent, ext);
 
-    // If template has an HTML component, add index.html
     if (['fullstack', 'game', 'react'].includes(template)) {
       createFile(uuid(), id, req.user.id, 'index.html', getStarterHTML(name), 'html');
     }
 
     const full = getSandboxById(id);
-    // Only broadcast to users who have access
     broadcastToSandbox(id, { type: 'sandbox_created', sandbox: full });
     res.json({ sandbox: full });
   } catch (err) {
@@ -150,17 +163,75 @@ app.post('/api/sandboxes', authMiddleware, (req, res) => {
   }
 });
 
+// Join — only allowed if user has edit access (invited/allowed). Public viewers must request.
 app.post('/api/sandboxes/:id/join', authMiddleware, (req, res) => {
   const sandbox = getSandboxById(req.params.id);
   if (!sandbox) return res.status(404).json({ error: 'Sandbox not found' });
   if (sandbox.status !== 'live' && sandbox.status !== 'promoted') return res.status(400).json({ error: 'Sandbox is not active' });
-  if (!canAccessSandbox(req.params.id, req.user.id)) {
-    return res.status(403).json({ error: 'This sandbox is private. Ask the owner to invite you.' });
+
+  // Only let people with edit access join directly (owner, invited, allowed_users)
+  if (!canEditSandbox(req.params.id, req.user.id)) {
+    return res.status(403).json({ error: 'You need to be invited or have your request approved to join.' });
   }
 
   joinSandbox(req.params.id, req.user.id);
   const updated = getSandboxById(req.params.id);
   broadcastToSandbox(req.params.id, { type: 'sandbox_updated', sandbox: updated });
+  res.json({ sandbox: updated });
+});
+
+// Request to join (for public space viewers who don't have edit access)
+app.post('/api/sandboxes/:id/request-join', authMiddleware, (req, res) => {
+  const sandbox = getSandboxById(req.params.id);
+  if (!sandbox) return res.status(404).json({ error: 'Sandbox not found' });
+  if (sandbox.status !== 'live' && sandbox.status !== 'promoted') return res.status(400).json({ error: 'Sandbox is not active' });
+
+  // Already a member?
+  const isMember = sandbox.collaborators?.some(c => c.user_id === req.user.id);
+  if (isMember) return res.status(400).json({ error: 'You are already a member' });
+
+  // Already has edit access (invited)?
+  if (canEditSandbox(req.params.id, req.user.id)) {
+    // Just join directly
+    joinSandbox(req.params.id, req.user.id);
+    const updated = getSandboxById(req.params.id);
+    broadcastToSandbox(req.params.id, { type: 'sandbox_updated', sandbox: updated });
+    return res.json({ sandbox: updated, joined: true });
+  }
+
+  const result = createJoinRequest(req.params.id, req.user.id, req.body.message || '');
+  if (!result) return res.status(400).json({ error: 'Request already pending or you are already a member' });
+
+  logActivity(req.params.id, req.user.id, 'request_join', `Requested to join`);
+  // Notify owner via WS
+  broadcastToSandbox(req.params.id, { type: 'join_request', sandboxId: req.params.id, request: result });
+  res.json({ request: result });
+});
+
+// Approve join request (owner only)
+app.post('/api/sandboxes/:id/requests/:requestId/approve', authMiddleware, (req, res) => {
+  const sandbox = getSandboxById(req.params.id);
+  if (!sandbox) return res.status(404).json({ error: 'Sandbox not found' });
+  if (sandbox.owner_id !== req.user.id) return res.status(403).json({ error: 'Only the owner can approve requests' });
+
+  const result = approveJoinRequest(req.params.requestId, req.user.id);
+  if (!result) return res.status(404).json({ error: 'Request not found' });
+
+  const updated = getSandboxById(req.params.id);
+  broadcastToSandbox(req.params.id, { type: 'sandbox_updated', sandbox: updated });
+  res.json({ sandbox: updated });
+});
+
+// Deny join request (owner only)
+app.post('/api/sandboxes/:id/requests/:requestId/deny', authMiddleware, (req, res) => {
+  const sandbox = getSandboxById(req.params.id);
+  if (!sandbox) return res.status(404).json({ error: 'Sandbox not found' });
+  if (sandbox.owner_id !== req.user.id) return res.status(403).json({ error: 'Only the owner can deny requests' });
+
+  const result = denyJoinRequest(req.params.requestId, req.user.id);
+  if (!result) return res.status(404).json({ error: 'Request not found' });
+
+  const updated = getSandboxById(req.params.id);
   res.json({ sandbox: updated });
 });
 
@@ -209,6 +280,18 @@ app.post('/api/sandboxes/:id/visibility', authMiddleware, (req, res) => {
   res.json({ sandbox: updated });
 });
 
+app.post('/api/sandboxes/:id/public-site', authMiddleware, (req, res) => {
+  const sandbox = getSandboxById(req.params.id);
+  if (!sandbox) return res.status(404).json({ error: 'Sandbox not found' });
+  if (sandbox.owner_id !== req.user.id) return res.status(403).json({ error: 'Only the owner can toggle public site' });
+
+  const { enabled } = req.body;
+  updatePublicSite(req.params.id, !!enabled);
+  logActivity(req.params.id, req.user.id, 'public_site', `Set public site to ${enabled ? 'on' : 'off'}`);
+  const updated = getSandboxById(req.params.id);
+  res.json({ sandbox: updated });
+});
+
 app.post('/api/sandboxes/:id/invite', authMiddleware, (req, res) => {
   const sandbox = getSandboxById(req.params.id);
   if (!sandbox) return res.status(404).json({ error: 'Sandbox not found' });
@@ -242,7 +325,7 @@ app.post('/api/sandboxes/:id/revoke', authMiddleware, (req, res) => {
 // ===================== FILE ROUTES =====================
 
 app.post('/api/sandboxes/:id/files', authMiddleware, (req, res) => {
-  const sandbox = requireSandboxAccess(req, res);
+  const sandbox = requireEditAccess(req, res);
   if (!sandbox) return;
 
   const { filename, content, fileType } = req.body;
@@ -255,7 +338,7 @@ app.post('/api/sandboxes/:id/files', authMiddleware, (req, res) => {
 });
 
 app.put('/api/sandboxes/:id/files/:fileId', authMiddleware, (req, res) => {
-  const sandbox = requireSandboxAccess(req, res);
+  const sandbox = requireEditAccess(req, res);
   if (!sandbox) return;
 
   const { content } = req.body;
@@ -270,7 +353,7 @@ app.put('/api/sandboxes/:id/files/:fileId', authMiddleware, (req, res) => {
 });
 
 app.put('/api/sandboxes/:id/files/:fileId/rename', authMiddleware, (req, res) => {
-  const sandbox = requireSandboxAccess(req, res);
+  const sandbox = requireEditAccess(req, res);
   if (!sandbox) return;
 
   const { filename } = req.body;
@@ -284,7 +367,7 @@ app.put('/api/sandboxes/:id/files/:fileId/rename', authMiddleware, (req, res) =>
 });
 
 app.delete('/api/sandboxes/:id/files/:fileId', authMiddleware, (req, res) => {
-  const sandbox = requireSandboxAccess(req, res);
+  const sandbox = requireEditAccess(req, res);
   if (!sandbox) return;
 
   deleteFile(req.params.fileId, req.user.id);
@@ -356,15 +439,15 @@ function getUserFromRequest(req) {
   return null;
 }
 
-// Check access: returns true if user can view. Owners, collaborators, and invited users pass silently.
+// Check access for live site: public_site flag, public visibility, or authenticated member
 function checkLiveSiteAccess(sandbox, fullId, req) {
-  // Public = everyone in
+  // public_site = site is public even if space is private
+  if (sandbox.public_site) return true;
   if (sandbox.visibility === 'public') return true;
   // Try to identify the user
   const user = getUserFromRequest(req);
   if (!user) return false;
-  // canAccessSandbox checks: owner, collaborator, or in allowed_users list
-  return canAccessSandbox(fullId, user.id);
+  return canViewSite(fullId, user.id);
 }
 
 // Serve a specific file from a sandbox: /s/:shortId/filename.ext
